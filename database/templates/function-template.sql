@@ -348,4 +348,321 @@ RETURNS BOOLEAN AS $$
 $$ LANGUAGE sql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION generate_slug(input_text TEXT)
-RETURNS TEXT AS $$
+RETURNS TEXT AS $
+BEGIN
+  -- Handle null input
+  IF input_text IS NULL THEN
+    RETURN NULL;
+  END IF;
+  
+  -- Convert to lowercase, remove special chars, replace spaces with hyphens
+  RETURN lower(
+    regexp_replace(
+      regexp_replace(
+        regexp_replace(input_text, '[^\w\s-]', '', 'g'),
+        '\s+', '-', 'g'
+      ),
+      '-+', '-', 'g'
+    )
+  );
+END;
+$ LANGUAGE plpgsql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION format_currency(
+  amount DECIMAL,
+  currency_code TEXT DEFAULT 'USD'
+)
+RETURNS TEXT AS $
+BEGIN
+  IF amount IS NULL THEN
+    RETURN NULL;
+  END IF;
+  
+  RETURN currency_code || ' ' || to_char(amount, 'FM999,999,999.00');
+END;
+$ LANGUAGE plpgsql IMMUTABLE;
+
+-- ==================================================
+-- 9. SOFT DELETE FUNCTION TEMPLATE
+-- ==================================================
+-- Pattern: Soft delete with cascade handling
+CREATE OR REPLACE FUNCTION soft_delete_record(
+  p_table_name TEXT,
+  p_record_id UUID,
+  p_user_id UUID DEFAULT auth.uid()
+)
+RETURNS BOOLEAN AS $
+DECLARE
+  query_text TEXT;
+  affected_rows INTEGER;
+BEGIN
+  -- Validate table name (prevent SQL injection)
+  IF p_table_name NOT IN ('users', 'orders', 'products', 'categories') THEN
+    RAISE EXCEPTION 'Invalid table name: %', p_table_name;
+  END IF;
+  
+  -- Build and execute dynamic query
+  query_text := format('
+    UPDATE %I 
+    SET 
+      deleted_at = now(),
+      deleted_by = $2
+    WHERE id = $1 
+      AND deleted_at IS NULL
+      AND (user_id = $2 OR EXISTS (
+        SELECT 1 FROM user_profiles 
+        WHERE user_id = $2 AND role = ''admin''
+      ))', p_table_name);
+  
+  EXECUTE query_text USING p_record_id, p_user_id;
+  GET DIAGNOSTICS affected_rows = ROW_COUNT;
+  
+  RETURN affected_rows > 0;
+END;
+$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ==================================================
+-- 10. API RATE LIMITING FUNCTION TEMPLATE
+-- ==================================================
+-- Pattern: Rate limiting for API endpoints
+CREATE OR REPLACE FUNCTION check_rate_limit(
+  p_endpoint TEXT,
+  p_max_requests INTEGER DEFAULT 100,
+  p_window_minutes INTEGER DEFAULT 60
+)
+RETURNS BOOLEAN AS $
+DECLARE
+  current_count INTEGER;
+  window_start TIMESTAMP WITH TIME ZONE;
+BEGIN
+  -- Calculate window start
+  window_start := date_trunc('minute', now()) - (p_window_minutes || ' minutes')::interval;
+  
+  -- Get current request count
+  SELECT COALESCE(SUM(request_count), 0)
+  INTO current_count
+  FROM api_rate_limits
+  WHERE user_id = auth.uid()
+    AND endpoint = p_endpoint
+    AND created_at > window_start;
+  
+  -- Check limit
+  IF current_count >= p_max_requests THEN
+    RETURN FALSE;
+  END IF;
+  
+  -- Log this request
+  INSERT INTO api_rate_limits (user_id, endpoint, request_count, created_at)
+  VALUES (auth.uid(), p_endpoint, 1, now())
+  ON CONFLICT (user_id, endpoint, date_trunc('minute', created_at))
+  DO UPDATE SET request_count = api_rate_limits.request_count + 1;
+  
+  RETURN TRUE;
+END;
+$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ==================================================
+-- 11. NOTIFICATION FUNCTION TEMPLATE
+-- ==================================================
+-- Pattern: Create notifications with templates
+CREATE OR REPLACE FUNCTION create_notification(
+  p_user_id UUID,
+  p_notification_type TEXT,
+  p_data JSONB DEFAULT '{}'::jsonb,
+  p_priority INTEGER DEFAULT 1
+)
+RETURNS UUID AS $
+DECLARE
+  notification_id UUID;
+  template_content TEXT;
+BEGIN
+  -- Get notification template
+  SELECT content INTO template_content
+  FROM notification_templates
+  WHERE type = p_notification_type AND is_active = true;
+  
+  IF template_content IS NULL THEN
+    RAISE EXCEPTION 'No active template found for type: %', p_notification_type;
+  END IF;
+  
+  -- Create notification
+  INSERT INTO notifications (
+    id,
+    user_id,
+    type,
+    title,
+    message,
+    data,
+    priority,
+    is_read,
+    created_at
+  ) VALUES (
+    gen_random_uuid(),
+    p_user_id,
+    p_notification_type,
+    p_data->>'title',
+    template_content,
+    p_data,
+    p_priority,
+    false,
+    now()
+  ) RETURNING id INTO notification_id;
+  
+  -- Trigger real-time notification if high priority
+  IF p_priority >= 3 THEN
+    PERFORM pg_notify(
+      'notification_' || p_user_id::text,
+      json_build_object(
+        'id', notification_id,
+        'type', p_notification_type,
+        'priority', p_priority
+      )::text
+    );
+  END IF;
+  
+  RETURN notification_id;
+END;
+$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ==================================================
+-- 12. DATA EXPORT FUNCTION TEMPLATE
+-- ==================================================
+-- Pattern: Secure data export with user permissions
+CREATE OR REPLACE FUNCTION export_user_data(
+  p_user_id UUID DEFAULT auth.uid(),
+  p_format TEXT DEFAULT 'json',
+  p_include_deleted BOOLEAN DEFAULT false
+)
+RETURNS TABLE(
+  table_name TEXT,
+  data JSONB
+) AS $
+DECLARE
+  export_tables TEXT[] := ARRAY['user_profiles', 'user_orders', 'user_preferences'];
+  table_name TEXT;
+  query_text TEXT;
+  table_data JSONB;
+BEGIN
+  -- Security check
+  IF p_user_id != auth.uid() AND NOT has_role('admin') THEN
+    RAISE EXCEPTION 'Access denied: can only export own data';
+  END IF;
+  
+  -- Validate format
+  IF p_format NOT IN ('json', 'csv') THEN
+    RAISE EXCEPTION 'Invalid format: %. Supported: json, csv', p_format;
+  END IF;
+  
+  -- Export each table
+  FOREACH table_name IN ARRAY export_tables
+  LOOP
+    -- Build query based on table
+    query_text := format('
+      SELECT jsonb_agg(to_jsonb(t))
+      FROM %I t
+      WHERE user_id = $1
+      %s',
+      table_name,
+      CASE WHEN NOT p_include_deleted THEN 'AND deleted_at IS NULL' ELSE '' END
+    );
+    
+    -- Execute query
+    EXECUTE query_text INTO table_data USING p_user_id;
+    
+    -- Return data if exists
+    IF table_data IS NOT NULL THEN
+      RETURN QUERY SELECT table_name, table_data;
+    END IF;
+  END LOOP;
+END;
+$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ==================================================
+-- FUNCTION USAGE EXAMPLES
+-- ==================================================
+
+/*
+-- 1. Using utility functions
+SELECT calculate_example(100.50, 1.15); -- Returns: 115.58
+SELECT generate_slug('Hello World! Special Characters@#); -- Returns: hello-world-special-characters
+
+-- 2. Using secure data access
+SELECT * FROM get_user_data(); -- Gets current user's data
+SELECT * FROM get_user_data('123e4567-e89b-12d3-a456-426614174000', 5, 0); -- Admin accessing specific user
+
+-- 3. Using search function
+SELECT * FROM search_records('important documents');
+
+-- 4. Using analytics
+SELECT * FROM get_analytics_summary();
+SELECT * FROM get_analytics_summary(auth.uid(), '2024-01-01', '2024-01-31');
+
+-- 5. Using batch operations
+SELECT * FROM batch_update_status(
+  ARRAY['123e4567-e89b-12d3-a456-426614174000', '987fcdeb-51d3-12e8-b456-426614174000'],
+  'completed'
+);
+
+-- 6. Using rate limiting
+SELECT check_rate_limit('api/search', 10, 5); -- 10 requests per 5 minutes
+
+-- 7. Creating notifications
+SELECT create_notification(
+  auth.uid(),
+  'order_completed',
+  '{"title": "Order Complete", "order_id": "12345"}'::jsonb,
+  2
+);
+*/
+
+-- ==================================================
+-- TRIGGER USAGE EXAMPLES
+-- ==================================================
+
+/*
+-- Apply update timestamp trigger to tables
+CREATE TRIGGER users_updated_at_trigger
+  BEFORE UPDATE ON users
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Apply validation trigger
+CREATE TRIGGER users_validation_trigger
+  BEFORE INSERT OR UPDATE ON users
+  FOR EACH ROW EXECUTE FUNCTION validate_business_rules();
+*/
+
+-- ==================================================
+-- BEST PRACTICES FOR FUNCTIONS
+-- ==================================================
+
+/*
+1. SECURITY:
+   - Use SECURITY DEFINER sparingly and validate permissions
+   - Sanitize all user inputs
+   - Use parameterized queries to prevent SQL injection
+   - Validate table/column names against allowlists
+
+2. PERFORMANCE:
+   - Keep functions focused and small
+   - Use appropriate return types (TABLE vs single values)
+   - Consider using IMMUTABLE for pure functions
+   - Add proper indexes for function filters
+
+3. ERROR HANDLING:
+   - Validate inputs early
+   - Provide meaningful error messages
+   - Use transactions for multi-step operations
+   - Log errors appropriately
+
+4. MAINTAINABILITY:
+   - Document function purpose and parameters
+   - Use consistent naming patterns
+   - Keep business logic in the application when possible
+   - Version functions when making breaking changes
+
+5. TESTING:
+   - Test with various input combinations
+   - Test error conditions
+   - Test with different user roles/permissions
+   - Performance test with realistic data volumes
+*/
