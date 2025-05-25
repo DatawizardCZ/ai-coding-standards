@@ -1,0 +1,481 @@
+[
+  {
+    "section_name": "table_structure",
+    "section_type": "metadata",
+    "result_json": [
+      {
+        "data_type": "uuid",
+        "column_name": "id",
+        "is_nullable": "NO",
+        "column_default": "gen_random_uuid()",
+        "ordinal_position": 1,
+        "character_maximum_length": null
+      },
+      {
+        "data_type": "uuid",
+        "column_name": "organization_id",
+        "is_nullable": "NO",
+        "column_default": null,
+        "ordinal_position": 2,
+        "character_maximum_length": null
+      },
+      {
+        "data_type": "character varying",
+        "column_name": "name",
+        "is_nullable": "NO",
+        "column_default": null,
+        "ordinal_position": 3,
+        "character_maximum_length": 100
+      },
+      {
+        "data_type": "text",
+        "column_name": "description",
+        "is_nullable": "YES",
+        "column_default": null,
+        "ordinal_position": 4,
+        "character_maximum_length": null
+      },
+      {
+        "data_type": "integer",
+        "column_name": "level",
+        "is_nullable": "YES",
+        "column_default": "0",
+        "ordinal_position": 5,
+        "character_maximum_length": null
+      },
+      {
+        "data_type": "jsonb",
+        "column_name": "permissions",
+        "is_nullable": "YES",
+        "column_default": "'[]'::jsonb",
+        "ordinal_position": 6,
+        "character_maximum_length": null
+      },
+      {
+        "data_type": "character varying",
+        "column_name": "category",
+        "is_nullable": "YES",
+        "column_default": "'staff'::character varying",
+        "ordinal_position": 7,
+        "character_maximum_length": 50
+      },
+      {
+        "data_type": "boolean",
+        "column_name": "is_system_role",
+        "is_nullable": "YES",
+        "column_default": "false",
+        "ordinal_position": 8,
+        "character_maximum_length": null
+      },
+      {
+        "data_type": "boolean",
+        "column_name": "is_active",
+        "is_nullable": "YES",
+        "column_default": "true",
+        "ordinal_position": 9,
+        "character_maximum_length": null
+      },
+      {
+        "data_type": "timestamp with time zone",
+        "column_name": "created_at",
+        "is_nullable": "NO",
+        "column_default": "now()",
+        "ordinal_position": 10,
+        "character_maximum_length": null
+      },
+      {
+        "data_type": "timestamp with time zone",
+        "column_name": "updated_at",
+        "is_nullable": "NO",
+        "column_default": "now()",
+        "ordinal_position": 11,
+        "character_maximum_length": null
+      },
+      {
+        "data_type": "uuid",
+        "column_name": "created_by",
+        "is_nullable": "YES",
+        "column_default": null,
+        "ordinal_position": 12,
+        "character_maximum_length": null
+      },
+      {
+        "data_type": "uuid",
+        "column_name": "updated_by",
+        "is_nullable": "YES",
+        "column_default": null,
+        "ordinal_position": 13,
+        "character_maximum_length": null
+      }
+    ]
+  },
+  {
+    "section_name": "constraints",
+    "section_type": "metadata",
+    "result_json": [
+      {
+        "column_name": "id",
+        "constraint_name": "roles_pkey",
+        "constraint_type": "PRIMARY KEY"
+      },
+      {
+        "column_name": "organization_id",
+        "constraint_name": "roles_organization_id_name_key",
+        "constraint_type": "UNIQUE"
+      },
+      {
+        "column_name": "name",
+        "constraint_name": "roles_organization_id_name_key",
+        "constraint_type": "UNIQUE"
+      },
+      {
+        "column_name": "organization_id",
+        "constraint_name": "roles_organization_id_fkey",
+        "constraint_type": "FOREIGN KEY"
+      },
+      {
+        "column_name": "created_by",
+        "constraint_name": "roles_created_by_fkey",
+        "constraint_type": "FOREIGN KEY"
+      },
+      {
+        "column_name": "updated_by",
+        "constraint_name": "roles_updated_by_fkey",
+        "constraint_type": "FOREIGN KEY"
+      }
+    ]
+  },
+  {
+    "section_name": "foreign_keys",
+    "section_type": "metadata",
+    "result_json": [
+      {
+        "constraint_name": "roles_organization_id_fkey",
+        "referenced_table": "organizations",
+        "referenced_column": "id",
+        "foreign_key_column": "organization_id"
+      },
+      {
+        "constraint_name": "roles_created_by_fkey",
+        "referenced_table": "profiles",
+        "referenced_column": "id",
+        "foreign_key_column": "created_by"
+      },
+      {
+        "constraint_name": "roles_updated_by_fkey",
+        "referenced_table": "profiles",
+        "referenced_column": "id",
+        "foreign_key_column": "updated_by"
+      }
+    ]
+  },
+  {
+    "section_name": "indexes",
+    "section_type": "metadata",
+    "result_json": [
+      {
+        "index_name": "roles_pkey",
+        "index_definition": "CREATE UNIQUE INDEX roles_pkey ON public.roles USING btree (id)"
+      },
+      {
+        "index_name": "roles_organization_id_name_key",
+        "index_definition": "CREATE UNIQUE INDEX roles_organization_id_name_key ON public.roles USING btree (organization_id, name)"
+      },
+      {
+        "index_name": "idx_roles_organization",
+        "index_definition": "CREATE INDEX idx_roles_organization ON public.roles USING btree (organization_id)"
+      },
+      {
+        "index_name": "idx_roles_category",
+        "index_definition": "CREATE INDEX idx_roles_category ON public.roles USING btree (organization_id, category)"
+      },
+      {
+        "index_name": "idx_roles_level",
+        "index_definition": "CREATE INDEX idx_roles_level ON public.roles USING btree (level)"
+      }
+    ]
+  },
+  {
+    "section_name": "table_statistics",
+    "section_type": "metadata",
+    "result_json": {
+      "tablename": "roles",
+      "schemaname": "public",
+      "last_vacuum": null,
+      "last_analyze": null,
+      "total_deletes": 0,
+      "total_inserts": 10,
+      "total_updates": 0,
+      "last_autovacuum": null,
+      "last_autoanalyze": null,
+      "estimated_current_rows": 10
+    }
+  },
+  {
+    "section_name": "row_count",
+    "section_type": "metadata",
+    "result_json": {
+      "exact_row_count": 10
+    }
+  },
+  {
+    "section_name": "table_size",
+    "section_type": "metadata",
+    "result_json": {
+      "index_size": "88 kB",
+      "table_size": "8192 bytes",
+      "total_size": "96 kB"
+    }
+  },
+  {
+    "section_name": "rls_status",
+    "section_type": "security",
+    "result_json": {
+      "table_name": "roles",
+      "rls_enabled": false,
+      "schema_name": "public"
+    }
+  },
+  {
+    "section_name": "rls_policies",
+    "section_type": "security",
+    "result_json": null
+  },
+  {
+    "section_name": "child_tables",
+    "section_type": "relationships",
+    "result_json": [
+      {
+        "referencing_table": "organization_memberships",
+        "referencing_column": "role_id",
+        "referenced_column_in_target": "id"
+      }
+    ]
+  },
+  {
+    "section_name": "parent_tables",
+    "section_type": "relationships",
+    "result_json": [
+      {
+        "referenced_table": "organizations",
+        "referenced_column": "id",
+        "referencing_column_in_target": "organization_id"
+      },
+      {
+        "referenced_table": "profiles",
+        "referenced_column": "id",
+        "referencing_column_in_target": "created_by"
+      },
+      {
+        "referenced_table": "profiles",
+        "referenced_column": "id",
+        "referencing_column_in_target": "updated_by"
+      }
+    ]
+  },
+  {
+    "section_name": "all_data",
+    "section_type": "data",
+    "result_json": [
+      {
+        "id": "730ba0ee-56c3-43e2-a66f-75e289962b84",
+        "name": "owner",
+        "level": 100,
+        "category": "staff",
+        "is_active": true,
+        "created_at": "2025-05-25T07:00:57.282667+00:00",
+        "created_by": null,
+        "updated_at": "2025-05-25T07:00:57.282667+00:00",
+        "updated_by": null,
+        "description": "Business owner with complete system access",
+        "permissions": [
+          "*"
+        ],
+        "is_system_role": false,
+        "organization_id": "3a53afc0-bcc7-4aca-a5e0-e3b19812cfa5"
+      },
+      {
+        "id": "ba449027-6eea-4d80-94fe-4f4899314e17",
+        "name": "manager",
+        "level": 80,
+        "category": "staff",
+        "is_active": true,
+        "created_at": "2025-05-25T07:00:57.282667+00:00",
+        "created_by": null,
+        "updated_at": "2025-05-25T07:00:57.282667+00:00",
+        "updated_by": null,
+        "description": "Gym manager with operational oversight",
+        "permissions": [
+          "members.*",
+          "trainers.*",
+          "classes.*",
+          "equipment.*",
+          "reports.read"
+        ],
+        "is_system_role": false,
+        "organization_id": "3a53afc0-bcc7-4aca-a5e0-e3b19812cfa5"
+      },
+      {
+        "id": "47009d31-a242-42f6-8b67-f4d2e6edbd94",
+        "name": "assistant_manager",
+        "level": 70,
+        "category": "staff",
+        "is_active": true,
+        "created_at": "2025-05-25T07:00:57.282667+00:00",
+        "created_by": null,
+        "updated_at": "2025-05-25T07:00:57.282667+00:00",
+        "updated_by": null,
+        "description": "Assistant manager with limited management access",
+        "permissions": [
+          "members.read",
+          "members.update",
+          "trainers.read",
+          "classes.*",
+          "equipment.read"
+        ],
+        "is_system_role": false,
+        "organization_id": "3a53afc0-bcc7-4aca-a5e0-e3b19812cfa5"
+      },
+      {
+        "id": "f6d7d9a0-24e1-4e4b-bc6c-631d1ce4ff20",
+        "name": "head_trainer",
+        "level": 60,
+        "category": "staff",
+        "is_active": true,
+        "created_at": "2025-05-25T07:00:57.282667+00:00",
+        "created_by": null,
+        "updated_at": "2025-05-25T07:00:57.282667+00:00",
+        "updated_by": null,
+        "description": "Senior trainer with training program oversight",
+        "permissions": [
+          "members.read",
+          "members.update",
+          "trainers.read",
+          "classes.*",
+          "schedule.*",
+          "progress.*"
+        ],
+        "is_system_role": false,
+        "organization_id": "3a53afc0-bcc7-4aca-a5e0-e3b19812cfa5"
+      },
+      {
+        "id": "ed5b9008-2298-457c-adbf-a3d4637f0ef1",
+        "name": "personal_trainer",
+        "level": 50,
+        "category": "staff",
+        "is_active": true,
+        "created_at": "2025-05-25T07:00:57.282667+00:00",
+        "created_by": null,
+        "updated_at": "2025-05-25T07:00:57.282667+00:00",
+        "updated_by": null,
+        "description": "Personal trainer with client management access",
+        "permissions": [
+          "members.read",
+          "members.update",
+          "schedule.*",
+          "progress.*",
+          "sessions.*"
+        ],
+        "is_system_role": false,
+        "organization_id": "3a53afc0-bcc7-4aca-a5e0-e3b19812cfa5"
+      },
+      {
+        "id": "8101b848-b548-4381-b282-36132e0c3ca7",
+        "name": "group_instructor",
+        "level": 45,
+        "category": "staff",
+        "is_active": true,
+        "created_at": "2025-05-25T07:00:57.282667+00:00",
+        "created_by": null,
+        "updated_at": "2025-05-25T07:00:57.282667+00:00",
+        "updated_by": null,
+        "description": "Group fitness instructor",
+        "permissions": [
+          "members.read",
+          "classes.*",
+          "schedule.read"
+        ],
+        "is_system_role": false,
+        "organization_id": "3a53afc0-bcc7-4aca-a5e0-e3b19812cfa5"
+      },
+      {
+        "id": "06033d0a-05bf-498a-b446-c89df7b67fd6",
+        "name": "sales_rep",
+        "level": 40,
+        "category": "staff",
+        "is_active": true,
+        "created_at": "2025-05-25T07:00:57.282667+00:00",
+        "created_by": null,
+        "updated_at": "2025-05-25T07:00:57.282667+00:00",
+        "updated_by": null,
+        "description": "Sales representative managing leads and conversions",
+        "permissions": [
+          "leads.*",
+          "members.create",
+          "members.read",
+          "consultations.*"
+        ],
+        "is_system_role": false,
+        "organization_id": "3a53afc0-bcc7-4aca-a5e0-e3b19812cfa5"
+      },
+      {
+        "id": "a10ec132-bb3d-4d1f-8a96-048b879744ad",
+        "name": "front_desk",
+        "level": 30,
+        "category": "staff",
+        "is_active": true,
+        "created_at": "2025-05-25T07:00:57.282667+00:00",
+        "created_by": null,
+        "updated_at": "2025-05-25T07:00:57.282667+00:00",
+        "updated_by": null,
+        "description": "Reception and customer service staff",
+        "permissions": [
+          "members.read",
+          "members.checkin",
+          "schedule.read",
+          "classes.read"
+        ],
+        "is_system_role": false,
+        "organization_id": "3a53afc0-bcc7-4aca-a5e0-e3b19812cfa5"
+      },
+      {
+        "id": "698d7114-46e3-49a6-8ab0-f8a7adfa9233",
+        "name": "nutritionist",
+        "level": 40,
+        "category": "staff",
+        "is_active": true,
+        "created_at": "2025-05-25T07:00:57.282667+00:00",
+        "created_by": null,
+        "updated_at": "2025-05-25T07:00:57.282667+00:00",
+        "updated_by": null,
+        "description": "Nutrition specialist",
+        "permissions": [
+          "members.read",
+          "members.update",
+          "consultations.*",
+          "nutrition.*"
+        ],
+        "is_system_role": false,
+        "organization_id": "3a53afc0-bcc7-4aca-a5e0-e3b19812cfa5"
+      },
+      {
+        "id": "a0fb5594-1c5b-4b51-ad04-28d74e33f027",
+        "name": "maintenance",
+        "level": 20,
+        "category": "staff",
+        "is_active": true,
+        "created_at": "2025-05-25T07:00:57.282667+00:00",
+        "created_by": null,
+        "updated_at": "2025-05-25T07:00:57.282667+00:00",
+        "updated_by": null,
+        "description": "Facility maintenance staff",
+        "permissions": [
+          "equipment.*",
+          "facility.*"
+        ],
+        "is_system_role": false,
+        "organization_id": "3a53afc0-bcc7-4aca-a5e0-e3b19812cfa5"
+      }
+    ]
+  }
+]
