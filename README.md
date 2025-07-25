@@ -1,4 +1,4 @@
-# FechtClub Development Standards
+# Development Standards
 
 ## 🎯 Purpose
 Centralized development standards and best practices for AI-assisted coding across multiple projects and tools.
