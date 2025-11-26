@@ -76,8 +76,9 @@ CREATE OR REPLACE FUNCTION function_name(
 )
 RETURNS TABLE (...)
 LANGUAGE plpgsql
-SECURITY DEFINER      -- if elevated privileges needed
-SET search_path = public
+SECURITY INVOKER      -- Default: runs with caller's permissions
+-- SECURITY DEFINER only if absolutely necessary (see Function Security section)
+-- SET search_path = public  -- Only needed with SECURITY DEFINER
 AS $$
 DECLARE
   v_local_var UUID;   -- prefix v_ for local variables
@@ -616,8 +617,8 @@ RETURNS TABLE (
   created_at TIMESTAMP
 )
 LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
+SECURITY INVOKER  -- Default: uses caller's permissions
+-- SET search_path not needed with SECURITY INVOKER
 AS $$
 DECLARE
   v_request_id UUID;
@@ -813,6 +814,9 @@ CREATE POLICY "Status-based access" ON documents
 
 ```sql
 -- Function to create profile on user signup
+-- NOTE: This trigger function requires SECURITY DEFINER because it's triggered
+-- by auth.users table which regular users cannot access. The trigger itself
+-- runs in a secure context managed by Supabase.
 CREATE OR REPLACE FUNCTION handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -833,7 +837,7 @@ BEGIN
   );
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- Trigger on auth.users
 CREATE TRIGGER on_auth_user_created
@@ -845,6 +849,9 @@ CREATE TRIGGER on_auth_user_created
 
 ```sql
 -- Function to sync profile changes
+-- NOTE: This trigger function requires SECURITY DEFINER because it's triggered
+-- by auth.users table which regular users cannot access. The trigger itself
+-- runs in a secure context managed by Supabase.
 CREATE OR REPLACE FUNCTION sync_user_profile()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -867,7 +874,7 @@ BEGIN
   
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 CREATE TRIGGER on_auth_user_updated
   AFTER UPDATE ON auth.users
@@ -878,10 +885,12 @@ CREATE TRIGGER on_auth_user_updated
 
 ```sql
 -- Get current user profile
+-- NOTE: In Supabase, auth.uid() is accessible to all users, so SECURITY INVOKER works
+-- Use SECURITY DEFINER only if you need to bypass RLS or access restricted data
 CREATE OR REPLACE FUNCTION get_current_user_profile()
 RETURNS profiles AS $$
   SELECT * FROM profiles WHERE user_id = auth.uid();
-$$ LANGUAGE sql SECURITY DEFINER;
+$$ LANGUAGE sql SECURITY INVOKER;
 
 -- Check user role
 CREATE OR REPLACE FUNCTION has_role(role_name TEXT)
@@ -891,13 +900,13 @@ RETURNS BOOLEAN AS $$
     WHERE user_id = auth.uid() 
     AND role = role_name
   );
-$$ LANGUAGE sql SECURITY DEFINER;
+$$ LANGUAGE sql SECURITY INVOKER;
 
 -- Get user organization
 CREATE OR REPLACE FUNCTION get_user_organization()
 RETURNS UUID AS $$
   SELECT organization_id FROM profiles WHERE user_id = auth.uid();
-$$ LANGUAGE sql SECURITY DEFINER;
+$$ LANGUAGE sql SECURITY INVOKER;
 ```
 
 ### Realtime Features
@@ -989,7 +998,88 @@ USING (bucket_id = 'public-files');
 
 ---
 
-## 6. Security Best Practices
+## 6. Database Security Best Practices
+
+### Row Level Security (RLS) - Critical Database Protection
+
+**⚠️ CRITICAL: RLS is the primary security mechanism for database access from client applications.**
+
+**RLS Core Principles:**
+- **Row Level Security is MANDATORY** - Enable RLS on ALL tables that contain user data (no exceptions)
+- RLS policies are evaluated for EVERY database query
+- `auth.uid()` is your trusted source of user identity (provided by Supabase Auth)
+- Trust ONLY `auth.uid()` for user identification in RLS policies and functions - NEVER accept user IDs from client input
+
+**Database-Level Security Requirements:**
+- Enable RLS on ALL tables that contain user data
+- Implement ALL validation logic in database functions, not just client-side
+- Assume all client input is malicious - validate everything in database functions
+- Default to restrictive RLS policies, then open up access as needed
+
+### RLS Implementation Patterns
+
+**When to Use Different RLS Patterns:**
+
+1. **User Isolation** - Use when data belongs to a single user (profiles, private settings)
+2. **Role-Based Access** - Use when different user types need different permissions (admin vs user)
+3. **Team/Organization Isolation** - Use for multi-tenant applications where users belong to teams
+4. **Public/Private Split** - Use when some data is public and some requires authentication
+5. **Time-Based Access** - Use when access should expire or have limited windows
+
+### RLS and Views: Critical Misconceptions
+
+**⚠️ CRITICAL MISCONCEPTION: RLS Protects Tables, NOT Views**
+
+Views do NOT have their own RLS protection. When a user queries a view, PostgreSQL scans the underlying base tables where RLS policies MUST exist. Creating a "safe view" with limited columns does NOT protect the data if the base table lacks RLS.
+
+**The Fix:**
+
+Enable RLS on BASE TABLES, not views. Views automatically inherit RLS protection from their base tables.
+
+**Key Rules:**
+- RLS policies live on **tables**, not views
+- Views inherit RLS from their base tables
+- Always enable RLS + policies on base tables BEFORE granting view access
+
+### PostgREST Security: Schema Exposure & RPC Surface
+
+**⚠️ CRITICAL SECURITY RISK: PostgREST automatically exposes your database structure and creates RPC endpoints.**
+
+**Two Critical Exposure Vectors:**
+
+1. **OpenAPI Schema Discovery**: PostgREST exposes an OpenAPI schema revealing all tables, views, and functions the `anon` role can access - including table names, columns, data types, and relationships
+2. **Automatic RPC Endpoints**: ALL functions in the `public` schema become callable via HTTP RPC, even internal helpers never intended for client access
+
+**The Problem:**
+
+- Attackers can map your database structure via OpenAPI without accessing data
+- Helper functions like `is_admin()`, `check_permissions()`, `count_metrics()` become shadow APIs
+
+### Database Role and Schema Security
+
+**Lock Down the `anon` Role:**
+- Start with ZERO grants to `anon`, add only what's absolutely necessary
+- Every grant to `anon` becomes a discoverable OpenAPI endpoint
+- Prefer minimal views over direct table access for anonymous users
+
+**Separate Public vs Private Schema Functions:**
+- Create `app_private` schema for internal helpers, validation, and utility functions
+- ONLY put RPC-intended functions in `public` schema
+- Use public wrappers with strict validation when RPC access is needed
+
+**Database Schema Organization Checklist:**
+- [ ] Move internal helpers to app_private schema
+- [ ] Only expose validated, minimal public functions for RPC
+- [ ] Use views instead of tables for anonymous access
+- [ ] Name public RPC functions clearly (e.g., api_* or rpc_* prefix)
+- [ ] Disable OpenAPI for anon if possible
+
+### Service Role Key Security
+
+**Service Role Key Usage:**
+- Service role key bypasses ALL RLS policies
+- Use ONLY for backend services, migrations, and admin scripts
+- NEVER expose in any client-accessible code or configuration
 
 ### Authentication & Access Control
 
@@ -1056,7 +1146,7 @@ BEGIN
   
   RETURN has_permission;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY INVOKER;
 ```
 
 ### Data Protection & Encryption
@@ -1085,6 +1175,9 @@ CREATE TABLE encrypted_member_data (
 );
 
 -- Function to encrypt sensitive data
+-- NOTE: This example uses SECURITY DEFINER because it needs to access
+-- encryption keys stored in database settings that regular users shouldn't access.
+-- In practice, consider using application-level encryption or a key management service.
 CREATE OR REPLACE FUNCTION encrypt_sensitive_data(
   p_data TEXT,
   p_data_type VARCHAR(50)
@@ -1105,7 +1198,7 @@ EXCEPTION WHEN OTHERS THEN
   
   RAISE EXCEPTION 'Encryption failed for data type: %', p_data_type;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 ```
 
 ### Audit Logging
@@ -1180,6 +1273,9 @@ CREATE TABLE audit_log (
 );
 
 -- Audit trigger function
+-- NOTE: In Supabase, auth.uid() is accessible to all users, so SECURITY INVOKER works.
+-- Use SECURITY DEFINER only if you need to audit actions that bypass RLS or
+-- if the trigger needs to access data the caller cannot see.
 CREATE OR REPLACE FUNCTION audit_trigger()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -1195,7 +1291,7 @@ BEGIN
   );
   RETURN COALESCE(NEW, OLD);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY INVOKER;
 
 -- Apply audit trigger to sensitive tables
 CREATE TRIGGER audit_users_trigger
@@ -1207,22 +1303,95 @@ CREATE TRIGGER audit_users_trigger
 
 #### Function Security
 
+**Default to SECURITY INVOKER** (PostgreSQL's default) - functions run with the caller's permissions.
+
 ```sql
--- Always use SECURITY DEFINER for functions that need elevated privileges
+-- RECOMMENDED: Use SECURITY INVOKER (default) with GRANT/REVOKE for access control
 CREATE OR REPLACE FUNCTION admin_only_function()
 RETURNS TABLE(sensitive_data TEXT)
-SECURITY DEFINER
+LANGUAGE plpgsql
+SECURITY INVOKER  -- Explicit, though this is the default
 AS $$
 BEGIN
-  -- Verify admin role
-  IF NOT has_role('admin') THEN
-    RAISE EXCEPTION 'Access denied: admin role required';
+  -- Function logic runs with caller's permissions
+  -- PostgreSQL enforces access control via grants
+  RETURN QUERY 
+    SELECT secret_column::TEXT 
+    FROM sensitive_table
+    WHERE authorized = true;
+END;
+$$;
+
+-- Control access using PostgreSQL's built-in security
+REVOKE ALL ON FUNCTION admin_only_function() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION admin_only_function() TO admin_role;
+GRANT EXECUTE ON FUNCTION admin_only_function() TO manager_role;
+```
+
+**SECURITY DEFINER: Use sparingly and with extreme caution**
+
+Only use when you need controlled privilege escalation (e.g., allowing limited access to data the caller can't directly query).
+
+```sql
+-- Example: Allow users to check if an email exists without seeing the emails
+CREATE OR REPLACE FUNCTION email_exists(p_email TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER  -- Runs as function owner, not caller
+SET search_path = public  -- CRITICAL: Prevent search_path attacks
+AS $$
+BEGIN
+  -- Validate input to prevent SQL injection
+  IF p_email IS NULL OR p_email !~ '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$' THEN
+    RAISE EXCEPTION 'Invalid email format';
   END IF;
   
-  -- Function logic here
-  RETURN QUERY SELECT 'sensitive_information'::TEXT;
+  -- Function can access users table even if caller cannot
+  RETURN EXISTS(SELECT 1 FROM users WHERE email = p_email);
 END;
-$$ LANGUAGE plpgsql;
+$$;
+
+-- Still control who can execute the function
+REVOKE ALL ON FUNCTION email_exists(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION email_exists(TEXT) TO app_user;
+
+-- Set function owner to a role with minimal necessary privileges
+ALTER FUNCTION email_exists(TEXT) OWNER TO limited_admin;
+```
+
+**Admin access pattern**
+
+```sql
+-- Create admin role
+CREATE ROLE admin_role;
+
+-- Grant specific privileges
+GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO admin_role;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO admin_role;
+
+-- Create admin function (runs with caller's permissions)
+CREATE OR REPLACE FUNCTION get_user_audit_log(p_user_id INT)
+RETURNS TABLE(action TEXT, performed_at TIMESTAMPTZ)
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+BEGIN
+  -- No manual role checks needed - PostgreSQL handles it
+  RETURN QUERY 
+    SELECT action_type::TEXT, created_at
+    FROM audit_log
+    WHERE user_id = p_user_id
+    ORDER BY created_at DESC;
+END;
+$$;
+
+-- Only admins can execute
+REVOKE ALL ON FUNCTION get_user_audit_log(INT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION get_user_audit_log(INT) TO admin_role;
+
+-- Assign admin role to specific users
+GRANT admin_role TO alice;
+GRANT admin_role TO bob;
 ```
 
 #### Input Sanitization
@@ -1591,7 +1760,8 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 - [ ] Business logic in the middle
 - [ ] Return results at the end
 - [ ] Add EXCEPTION block with logging
-- [ ] Use `SECURITY DEFINER` if elevated privileges needed (with permission checks)
+- [ ] Default to `SECURITY INVOKER` (PostgreSQL default)
+- [ ] Only use `SECURITY DEFINER` in rare cases (see Function Security section) with `SET search_path` and strict input validation
 
 ### After Creating a Function
 

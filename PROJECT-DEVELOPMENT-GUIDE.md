@@ -372,6 +372,23 @@ CREATE OR REPLACE FUNCTION function_name(...) ...;
 
 ## 🔐 Security Requirements
 
+### Frontend-First Security Model
+
+**⚠️ CRITICAL: When using Supabase directly from the frontend, your security model is fundamentally different from traditional backend architectures.**
+
+**Key Security Layers:**
+1. **Database RLS** - Your primary security layer (see DATABASE-STANDARDS.md)
+2. **API Key Management** - Protecting access credentials
+3. **Client-Side Validation** - User experience (NOT security)
+4. **Authentication** - Session and user management
+
+### API Key Management
+
+**Key Management Rules:**
+1. ✅ Anon key goes in frontend environment variables (e.g., `VITE_SUPABASE_ANON_KEY`)
+2. ❌ Service role key NEVER goes in any frontend-accessible location
+3. ✅ Service role key should only exist in server-side code, CI/CD secrets, or local admin scripts
+
 ### Authentication & Session Management
 
 **Implementation:**
@@ -393,32 +410,39 @@ if (!user) {
 
 **Critical Principle:** Organization-based data isolation
 
+**Frontend Developer Responsibilities:**
+- Understand that RLS is your primary security layer
+- Never attempt to bypass RLS or use service role key in frontend
+- Report any data access issues that might indicate RLS misconfiguration
+
+**For RLS Implementation Details:** See `DATABASE-STANDARDS.md` Section 6
+
+**Quick Reference:**
 ```sql
--- REQUIRED: Enable RLS on all tables
+-- All tables must have RLS enabled
 ALTER TABLE leads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE onboardings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE clients ENABLE ROW LEVEL SECURITY;
 
--- Example policy: Users see only their organization's data
-CREATE POLICY user_organization_data ON leads
-FOR ALL TO authenticated
-USING (
-  organization_id IN (
-    SELECT organization_id
-    FROM organization_memberships
-    WHERE user_id = auth.uid()
-  )
-);
+-- Policies enforce organization-based isolation
+-- See DATABASE-STANDARDS.md for full policy examples
 ```
 
-### Input Validation with Zod
+### Input Validation: Client-Side vs Server-Side
 
-**Always validate user input:**
+**⚠️ CRITICAL: Client-side validation is for user experience ONLY, not security.**
+
+**Two-Layer Validation Strategy:**
+
+1. **Client-Side (Zod)** - Immediate user feedback, better UX
+2. **Database-Side (SQL)** - Actual security enforcement, cannot be bypassed
+
+**Client-Side Validation with Zod:**
 
 ```typescript
 import { z } from "zod";
 
-// Define schema
+// Define schema for UX validation
 const OnboardingSchema = z.object({
   leadId: z.string().uuid("Invalid lead ID"),
   consultationDate: z.string().date().optional(),
@@ -432,7 +456,7 @@ const LeadSchema = z.object({
   phone: z.string().regex(/^\+?[0-9]{9,15}$/, "Neplatné telefonní číslo").optional(),
 });
 
-// Validate in component
+// Validate in component for UX
 try {
   const validated = OnboardingSchema.parse({
     leadId,
@@ -532,15 +556,23 @@ VALUES (
 ### Security Checklist for New Features
 
 Before deploying any new feature, verify:
-- [ ] RLS policies active on all new tables
-- [ ] Input validation with Zod schemas
+
+**Frontend Security:**
+- [ ] Using anon key (NEVER service role key) in frontend code
+- [ ] Client-side validation with Zod schemas for UX
 - [ ] Error messages don't reveal sensitive information
+- [ ] No sensitive data in console.log statements
+- [ ] Environment variables properly configured (.env files)
+- [ ] TypeScript strict mode passes
+- [ ] Accessibility standards met
+
+**Database Security (see DATABASE-STANDARDS.md):**
+- [ ] RLS policies active on all new tables
+- [ ] Database functions validate ALL inputs
 - [ ] Using RPC functions (no direct queries)
 - [ ] Audit logging for critical operations
 - [ ] Rate limiting for mutations
-- [ ] Accessibility standards met
-- [ ] TypeScript strict mode passes
-- [ ] No console.log in production code
+- [ ] Functions use `auth.uid()` for user identification (never client-provided IDs)
 
 ---
 
